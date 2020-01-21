@@ -1,0 +1,163 @@
+package Jpred;
+
+=head1 NAME
+
+jpred.pm -- Jpred module to define all necessary global and environment variables
+
+=cut
+
+use warnings;
+use strict;
+
+BEGIN {
+  use Exporter;
+  our @ISA = ('Exporter');
+  our @EXPORT =
+    qw($WEBSERVER $WEBSERVERCGI $SERVERROOT $SRSSERVER $CHKLOG $RESULTS $PDBLNK $CSS $IMAGES $JNET $TIMEOUT $BATCHLIM $DUNDEE $JPREDUSER $JPREDEMAIL $MAILHOST $JPREDROOT $BINDIR $LIBDIR $JOBDIR $PREFIX $RESOURCE $BLASTDB $SWALL $SWALLFILT $PDB $PDB_DAT $JPREDHEAD $JPREDFOOT &xsystem);
+  our @EXPORT_OK = @EXPORT;
+}
+
+# library path for Mail::CheckUser dependency for jpred_form.
+# for some reason doesn't work if in PERL5LIB
+use lib '/sw/lib/perl5.10.1/lib/perl5';
+
+############################################################################
+# URIs
+#production server
+our $WEBSERVER = 'http://www.compbio.dundee.ac.uk/www-jpred';
+#development server
+#our $WEBSERVER    = 'http://gjb-www-1.cluster.lifesci.dundee.ac.uk:3209';
+############################################################################
+
+our $WEBSERVERCGI = "$WEBSERVER/cgi-bin";
+
+#$SERVERROOT = "$WEBSERVER/~www-jpred";
+our $SERVERROOT = "$WEBSERVER";
+#our $SRSSERVER  = 'http://srs.ebi.ac.uk/srs6bin/cgi-bin';
+our $SRSSERVER  = 'http://www.ebi.ac.uk/ebisearch/search.ebi';
+our $CHKLOG     = "$WEBSERVERCGI/chklog?";
+our $RESULTS    = "$SERVERROOT/results";
+our $PDBLNK     = "http://www.ebi.ac.uk/pdbsum/";
+our $CSS        = "$SERVERROOT/jpred.css";
+our $IMAGES     = "$SERVERROOT/images";
+our $JNET       = "$SERVERROOT/about.html#jnet";
+
+# This is the time (in seconds) the job is allowed to take
+our $TIMEOUT  = 60 * 180;    # now is 180mins
+our $BATCHLIM = 200;
+
+our $DUNDEE = "http://www.dundee.ac.uk";
+
+# e-mail details
+our $JPREDUSER  = 'www-jpred';
+our $JPREDEMAIL = 'www-jpred@compbio.dundee.ac.uk';
+our $MAILHOST   = 'smtp.lifesci.dundee.ac.uk';        # CC 19/05/06 - updated to current smtp host from weevil
+
+# Server paths
+our $JPREDROOT = '/homes/www-jpred/live';
+#our $JPREDROOT = '/homes/www-jpred/devel';
+
+# Directory for binaries either on the cluster or on the www server
+our $BINDIR = "$JPREDROOT/bin";
+
+# path to perl modules
+our $LIBDIR = "$JPREDROOT/lib";
+
+# Cluster paths
+our $JOBDIR = "$JPREDROOT/public_html/results";    # directory for output
+
+# Cluster names
+our $PREFIX   = "jp_";                             # Prefix for job submissions (qstat will only display 10 chars of job name)
+our $RESOURCE = "www_service2";                    # Resource for the submission to use
+
+# Variables for external programs
+# psiblast
+$ENV{BLASTMAT} = "$JPREDROOT/data/blast";
+our $BLASTDB = $JPREDROOT . "/databases";
+$ENV{BLASTDB} = $BLASTDB;
+our $SWALL     = "$BLASTDB/uniref90";
+our $SWALLFILT = "$SWALL.filt";
+our $PDB       = '/db/blastdb/pdb';
+our $PDB_DAT   = '/db/blastdb/DB.dat';
+
+# ncoils matrix location
+$ENV{COILSDIR} = "$JPREDROOT/data/coils";
+
+# Error checking system call
+sub xsystem {
+  my ($command) = @_;
+  my $rc = 0xffff & system $command;
+  if ( $rc == 0 ) {
+    return;
+  } elsif ( $rc == 0xff00 ) {
+    print "'$command' failed!\n";
+    die "Jpred failed\n";
+  } elsif ( ( $rc & 0xff ) == 0 ) {
+    $rc >>= 8;
+    die "'$command' did something else! (exited $rc)\n";
+  } else {
+    if ( $rc & 0x80 ) {
+      $rc &= ~0x80;
+      print "'$command' dumped core!\n";
+      die "Jpred failed\n";
+    }
+  }
+}
+
+# The header and footer for any HTML produced dynamically
+our $JPREDHEAD = "      <div id=\"header\">
+
+         <a href=\"$DUNDEE\">
+         <img class=\"uod\" src=\"$IMAGES/logo_white_small.gif\" height=\"100\" width=\"108\" title=\"University of Dundee\" alt=\"University of Dundee Logo\" />
+         </a>
+        <a href=\"$SERVERROOT/index.html\"> 
+	<img src=\"$IMAGES/jpred3.png\" border=\"0\" height=\"102\" width=\"520\" title=\"Jpred Logo\" alt=\"Jpred Logo\" />
+	</a>
+         <a href=\"http://www.compbio.dundee.ac.uk\">
+            <img src=\"$IMAGES/group.png\" border=\"0\" height=\"102\" width=\"70\" title=\"Group Link\" alt=\"The Barton Group\" />
+         </a>
+
+         <div id=\"navigation\">
+            <table border=\"0\" cellpadding=\"0\" width=\"100%\">
+               <tr>
+                  <td class=\"nav_table\"><a class=\"nav\" href=\"$SERVERROOT/index.html\">Home</a></td>
+
+                  <td class=\"nav_table\"><a class=\"nav\" href=\"$SERVERROOT/about.html\">About</a></td>
+                  <td class=\"nav_table\"><a class=\"nav\" href=\"$SERVERROOT/new.html\">News</a></td>
+                  <td class=\"nav_table\"><a class=\"nav\" href=\"$SERVERROOT/faq.html\">FAQ</a></td>
+                  <td class=\"nav_table\"><a class=\"nav\" href=\"$SERVERROOT/help.html\">Help</a></td>
+                  <td class=\"nav_table\"><a class=\"nav\" href=\"$SERVERROOT/contact.html\">Contact</a></td>
+               </tr>
+
+             </table>
+         </div> <!-- End #navigation -->
+      </div> <!-- End #header -->
+";
+
+our $JPREDFOOT = '
+      <script type="text/javascript">
+         var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+         document.write(unescape("%3Cscript src=\'" + gaJsHost + "google-analytics.com/ga.js\' type=\'text/javascript\'%3E%3C/script%3E"));
+      </script>
+      <script type="text/javascript">
+         try{
+            var pageTracker = _gat._getTracker("UA-5356328-1");
+            pageTracker._trackPageview();
+         } catch(err) {}
+      </script>
+';
+1;
+
+=head1 DESCRIPTION
+
+This module defines all the global and envirnmental variables required by the Jpred server scripts and binaries.
+
+=head1 AUTHOR
+
+I'm not sure who originally wrote this module, but I guess all of the following contributed:
+
+James Cuff
+Jon Barber
+Chris Cole <christian@cole.name> (current maintainer)
+
+=cut

@@ -1,0 +1,988 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+jpred - Secondary structure prediction program
+
+=head1 SYNOPSIS
+
+  jpred --sequence <fasta file> [--output <output prefix>] [--db <database>] [--psi <psiblast output>] [--pred-nohits] [--verbose] [--debug] [--help] [--man]
+
+=head1 DESCRIPTION
+
+This is a program which predicts the secondary structure of a sequence given a path to a FASTA sequence. 
+It does all the PSI-BLAST searching and alignment 'meddling' as required by Jnet.
+
+The program is primarily design for use by the Jpred server, but it can be used directly by any user. 
+Some of the output may not be meaningful if used directly - it can be safely ignored.
+
+=head1 OPTIONS
+
+=over 5
+
+=item --sequence path
+
+The path to the sequence (in FASTA format) you want to predict.
+
+=item --output file
+
+A prefix to the filenames created by Jpred, defaults to the value set by --sequence.
+
+=item --db database
+
+Database to use for PSI-BLAST querying. This only accepts databases from a list which is pre-defined in the code. Crap I know, but that's the way it is at the moment. It's probably best to stick the default for the time being.
+
+Default: uniref90
+
+=item --psi path
+
+Path to a PSIBLAST output file.
+
+=item --pred-nohits
+
+Toggle allowing Jpred to make predictions even when there are no PSI-BLAST hits.
+
+=item --verbose
+
+Verbose mode. Print more information while running jpred.
+
+=item --debug
+
+Debug mode. Print debugging information while running jpred. 
+
+=item --help
+
+Gives help on the programs usage.
+
+=item --man
+
+Displays this man page.
+
+=back
+
+=head1 BUGS
+
+Can't cope with gaps in the query sequence.
+
+Doesn't accept alignments.
+
+If you find any others please contact me.
+
+=head1 AUTHORS
+
+Jonathan Barber <jon@compbio.dundee.ac.uk>
+
+Chris Cole <christian@cole.name> 
+
+Alexey Drozdetskiy <a.drozdetskiy@dundee.ac.uk> (current maintainer) 
+
+=cut
+
+## TODO check for gaps in query sequence
+##      check for disallowed chars in sequence
+
+use strict;
+use warnings;
+use Getopt::Long;
+use Pod::Usage;
+use Carp;
+use UNIVERSAL qw(isa);
+use Data::Dumper;
+use File::Temp;
+
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+#use lib "lib";
+#use lib "/home/asherstnev/Projects/Jpred/jpred/trunk/lib";
+
+use Jpred;    # needed to define BLAST environment variables
+
+# my modules
+use HMMER::Profile;
+use HMMER::Profile::Jnet;
+
+use PSIBLAST;
+use PSIBLAST::PSSM;
+use PSIBLAST::Run;
+
+use FASTA::File;
+use FASTA;
+
+use Index;
+use OC;
+use Utils qw(profile);
+use Run qw(check);
+use Paths qw($pairwise $oc $jnet $hmmbuild $hmmconvert $psiblastbin);
+
+our $VERSION   = '4.0.0';
+my $MAX_ALIGN = 1000;      # maximum number of alignment sequences allowed
+my $NR_CUT    = 75;        # cut-off seqeunce ID value for defining non-redundancy
+
+our $BLASTDB = $JPREDROOT . "/databases";
+$ENV{BLASTDB} = $BLASTDB;
+my $myCheckBLASTDB = `echo $BLASTDB`;
+##print "Current BLASTDB env. variable: $myCheckBLASTDB\n";
+print "DB is global.\n";
+#system("cat /homes/www-jpred/databases/checked_hosts.txt");
+if (1) {
+    my $myhost = `hostname | sed 's%\\.% %g' | awk '{print \$1}'`;
+    chomp($myhost);
+    print "Host: $myhost\n";
+    my $mycom = "grep \"$myhost\" /homes/www-jpred/databases/checked_hosts.txt";
+    #print "$mycom\n";
+    my $mytest = qx($mycom);
+    #print "Mytest: $mytest\n";
+    if (length($mytest)>0) {
+	my $localBLASTDB = "/local/gjb_lab/webservices/www-jpred/databases/";
+	$ENV{BLASTDB} = $localBLASTDB;
+	$myCheckBLASTDB = `echo \$BLASTDB`;
+	##print "Changed to local. Current BLASTDB env. variable: $myCheckBLASTDB\n";
+	print "Changed DB to local.\n";
+	#system("ls -ltrh /local/gjb_lab/webservices/www-jpred/databases/* > test.out")
+    } else {
+	#chdir("/local/gjb_lab/webservices/www-jpred/databases/");
+	#my $checkoutput = "/homes/www-jpred/live4/databases/" . $myhost . "_md5sum_test_results.txt";
+	#if (!(-e $checkoutput)) {
+	#    system("md5sum -c /homes/www-jpred/live4/databases/md5sum_check.txt > $checkoutput");
+	#}
+    }
+    #exit;
+} 
+
+# Light object to hold sequence information, light to prevent memory overload
+# for big search results. Even so this is quite memory intensive, I can't see
+# how to reduce the size further.
+{
+
+  package PSISEQ;
+
+  #use Compress::LZF qw(compress decompress);
+
+  sub new {
+    my ( $class, %args ) = @_;
+    my $self = [];
+    bless $self, $class;
+    for ( keys %args ) { $self->$_( $args{$_} ) }
+    return $self;
+  }
+
+  sub id {
+    return defined $_[1]
+      ? $_[0]->[0] = $_[1]
+      : $_[0]->[0];
+  }
+
+  sub start {
+    return defined $_[1]
+      ? $_[0]->[1] = $_[1]
+      : $_[0]->[1];
+  }
+
+  sub align {
+    if ( defined $_[1] ) {
+      ref $_[1] eq 'ARRAY' or die "Not passed ARRAY ref";
+
+      #$_[0]->[2] = compress(join "", @{ $_[1] });
+      $_[0]->[2] = join( "", @{ $_[1] } );
+    } else {
+
+      #return [ split //, decompress($_[0]->[2]) ];
+      return [ split( //, $_[0]->[2] ) ];
+    }
+  }
+}
+
+# Key to database information and information for accessing them
+my $dbPATH   = '/homes/chris/projects/Jnet/db';
+my $db_entry = "uniref90";
+my $database = {
+
+  ## default database used by Jpred
+  uniref90 => {
+    database   => 'uniref.filt',
+    unfiltered => 'uniref90.fasta',
+  },
+
+  ## database used during Jnet training
+  training => {
+    database   => 'training/uniref90.filt',
+    unfiltered => 'training/uniref90',
+  },
+
+  ## cluster-specific path for Jpred
+  cluster => {
+    database   => '/local/gjb_lab/www-jpred/uniref90.filt',
+    unfiltered => '/local/gjb_lab/www-jpred/uniref90',
+  },
+
+  ## these other DBs are experimental ones used during development.
+  ## check they exist before using them.
+  swall => {
+
+    # generic entry for use with validate_jnet.pl
+    # real db location defined by validate_jnet.pl
+    database   => "$dbPATH/swall/swall.filt",    # CC new
+    unfiltered => "$dbPATH/swall/swall",
+  },
+  uniprot => {
+
+    # Path to PSIBLAST db
+    database   => "$dbPATH/3/swall.filt",        # CC new
+    unfiltered => "$dbPATH/3/swall",
+  },
+  uniref50 => {
+    database   => "$dbPATH/6/swall.filt",
+    unfiltered => "$dbPATH/6/swall",
+  },
+};
+
+# Gap characters in sequences
+our $GAP = '-';
+
+my ( $help, $man, $path, $output, $psiblast, $DEBUG, $VERBOSE );
+my $predNoHits = 0;    # define whether to make predictions when no PSI-BLAST hits are found
+GetOptions(
+  "help"        => \$help,
+  "man"         => \$man,
+  "verbose"     => \$VERBOSE,
+  "sequence=s"  => \$path,
+  "output=s"    => \$output,
+  "psi=s"       => \$psiblast,
+  "db=s"        => \$db_entry,
+  "pred-nohits" => \$predNoHits,
+  "debug"       => \$DEBUG
+) or pod2usage(2);
+pod2usage(1) if $help;
+pod2usage( verbose => 2 ) if $man;
+
+pod2usage(' --sequence argument not provided') unless $path;
+die "--db $db_entry not recognised" unless exists $database->{$db_entry};
+$output = $path unless $output;
+
+for ( [ "path", $path ], [ "output", $output ], [ "psi", $psiblast ], [ "db", $db_entry ] ) {
+  my ( $key, $value ) = @{$_};
+  defined $value or next;
+  errlog( join( ": ", $key, $value ), "\n" );
+}
+
+my $query = FASTA::File->new( read_file => $path );
+
+my $initime = time;
+my $dtime = time - $initime;
+print "Time STEP0: $dtime\n";
+
+my @seqs;
+if (1) {
+  my $psi = PSIBLAST->new;    # CC PSIBLAST.pm doesn't have a new() class??
+  unless ( defined $psiblast && -e $psiblast ) {
+    my $psi_run = PSIBLAST::Run->new(
+      debug => $DEBUG,
+
+      #         path => "/software/jpred_bin/blastpgp",
+      path     => $psiblastbin,                       # CC new path
+      input    => $path,
+      multi    => 4,	
+      output   => "$output.blast",
+      matrix   => "$output.profile",
+      database => $database->{$db_entry}{database},
+      ## potentially a better set of parameters (esp. -b & -v)
+      ## which avoid PSI-BLAST dying with large number of hits
+      # args => '-e0.05 -h0.01 -m6 -b10000 -v10000 -j3 -F "m S"'  # 'soft' filtering of the query sequence
+      # args => '-e0.001 -h0.0001 -m6 -b10000 -v10000 -j3' # stricter searching criteria
+      # args => '-e0.05 -h0.01 -m6 -b10000 -v10000 -j3'
+    );
+
+    # For reduced databases, get the size of the orginal and use this as
+    # the equivilent DB size
+    #print $db_entry, "\n";
+    if ( $db_entry =~ /^sp_red_/ ) {
+      ( my $entry = $db_entry ) =~ s/^sp_red_/sp_/;
+      $psi_run->args(
+        $psi_run->args . " -z " . fasta_seq_length( $database->{$entry}{database} )    # CC sub is below
+      );
+    }
+    print "BLAST matrix: $ENV{BLASTMAT}\n" if $DEBUG;
+    print "BLASTDB path: $ENV{BLASTDB}\n"  if $DEBUG;
+
+    print "Running PSI-BLAST on query against \'$database->{$db_entry}{database}\'...\n" if $VERBOSE;
+    $psi_run->run or die;                                                              # CC sub is from PSIBLAST::Run
+
+    $psi->read_file("$output.blast");                                                  # CC PSIBLAST.pm doesn't have a read_file(), but Read.pm does?
+    system("gzip -9f $output.blast");
+  } else {
+    if   ( $psiblast =~ /.gz$/ ) { $psi->read_gzip_file($psiblast) }                   # CC PSIBALST.pm doesn't have a read_gzip_file() object, but Read.pm does?
+    else                         { $psi->read_file($psiblast) }                        # CC ditto above
+  }
+
+  # Convert the last itteration into a collection of PSISEQ objects
+  for ( $psi->get_all ) {                                                              # CC sub is from PSIBLAST.pm
+    my ( $id, $start, $align ) = @{$_};
+    push @seqs,
+      PSISEQ->new(
+      id    => $id,
+      start => $start,
+      align => [ split( //, $align ) ]
+      );
+  }
+}
+
+$dtime = time - $initime;
+print "Time STEP1: $dtime\n";
+
+## When there are no PSI-BLAST hits generate an HMM from the query
+## and run Jnet against that only.
+## Accuracy won't be as good, but at least it's a prediction
+if ( @seqs == 0 ) {
+  if ( $predNoHits == 0 ) {
+    warn "\nJPRED: Warning - no PSI-BLAST hits found and '--pred-nohits' option not set. Exiting...\n";
+    print ">>100% complete\n";
+    exit;
+  }
+  print ">>50% complete\n";
+  warn "\nJPRED: no PSI-BLAST hits found. Continuing with single query sequence only.\n\n";
+  print "Running HMMer on query...\n" if $VERBOSE;
+
+  # copy input query to alignment
+  system("cp $path $output.align") == 0 or croak "Error: unable to copy '$path'\n";
+
+  # Temp files required for HMMer
+  my ( $hmmbuild_out, $hmmconvert_out ) = map { File::Temp->new->filename } 1 .. 2;
+
+  system("$hmmbuild -F --fast --amino --gapmax 1 --wblosum $hmmbuild_out $path");
+  system("$hmmconvert -F -p $hmmbuild_out $hmmconvert_out");
+
+  # Read in the HMMER file
+  my $hmmer = HMMER::Profile->new( read_file => $hmmconvert_out );
+
+  # Convert from HMMER::Profile to HMMER::Profile::Jnet
+  my $hmmer_jnet = HMMER::Profile::Jnet->new;
+  $hmmer_jnet->add_line( @{$_} ) for $hmmer->get_line;
+  $hmmer_jnet->write_file("$output.hmm");    # write_file is in the Read.pm called from the HMMER::Profile module
+  print ">>70% complete\n";
+
+  # Run Jnet for the prediction
+  print "Running JNet using the generated inputs from HMM only...\n" if $VERBOSE;
+  jnet( map { "$output.$_" } qw(hmm jnet) );    # CC sub is below
+
+  print "Jpred Finished\n";
+  exit;
+}
+
+$dtime = time - $initime;
+print "Time STEP2: $dtime\n";
+
+psiseq2fasta( "0.fasta.gz", @seqs ) if $DEBUG;    # CC sub is below
+print ">>40% complete\n";
+
+# Make PSIBLAST truncated alignments the right length
+print "Untruncating the PSIBLAST alignments...\n" if $VERBOSE;
+@seqs = extend( $query, @seqs );                  # CC sub si below
+psiseq2fasta( "1.fasta.gz", @seqs ) if $DEBUG;
+
+# Remove masking from PSIBLAST alignment
+print "Unmasking the alignments...\n" if $VERBOSE;
+dex($_) for @seqs[ 1 .. $#seqs ];                 ## <-- CC dies here in dex() - found below
+#psiseq2fasta( "2.fasta.gz", @seqs ) if $DEBUG;
+psiseq2fasta( "2.fasta.gz", @seqs );
+
+# Convert the sequences to upper case
+print "Converting sequences to the same case...\n" if $VERBOSE;
+toupper($_) for @seqs;                            # CC sub is below
+psiseq2fasta( "${output}_backup.fasta.gz", @seqs );
+
+# Remove excessive sequences
+print "Remove excessive sequences...\n" if $VERBOSE;
+@seqs = reduce( $MAX_ALIGN, @seqs );              # CC sub is below
+psiseq2fasta( "3.fasta.gz", @seqs ) if $DEBUG;
+
+# Remove sequences that are too long or too short
+print "Remove sequences which too long or short...\n" if $VERBOSE;
+@seqs = del_long_seqs( 50, @seqs );               # CC sub is below
+psiseq2fasta( "4.fasta.gz", @seqs ) if $DEBUG;
+
+# Remove redundant sequences based upon pairwise identity and OC clustering
+print "Remove redundant sequences...\n" if $VERBOSE;
+@seqs = nonred( $NR_CUT, @seqs );                 # CC sub is below
+psiseq2fasta( "5.fasta.gz", @seqs ) if $DEBUG;
+
+# Check that we haven't got rid of all of the sequences
+if ( @seqs < 2 ) {
+  warn "JPRED: All the sequences found by PSIBLAST were removed during filtering, reverting to prefiltered sequences\n";
+  @seqs = fasta2psiseq("${output}_backup.fasta.gz");
+}
+unlink("${output}_backup.fasta.gz") unless $DEBUG;
+
+# Remove gaps in the query sequence and same positions in the alignment
+print "Removing gaps in the query sequence...\n" if $VERBOSE;
+degap(@seqs);                                     # CC sub is below
+psiseq2fasta( "6.fasta.gz", @seqs ) if $DEBUG;
+
+# Output the alignment for the prediction
+print "Outputting cleaned-up PSI_BLAST alignment...\n" if $VERBOSE;
+psiseq2fasta( "$output.align", @seqs );
+
+$dtime = time - $initime;
+print "Time STEP3: $dtime\n";
+
+{
+  # Equivilent to getpssm script
+  print "Output the PSSM matrix from the PSI-BLAST profile...\n";
+  my $pssm = PSIBLAST::PSSM->new( read_file => "$output.profile" );
+  $pssm->write_file("$output.pssm");              # CC write_file() sub is in Write.pm loaded via PSIBLAST::PSSM
+}
+print ">>50% complete\n";
+
+$dtime = time - $initime;
+print "Time STEP4: $dtime\n";
+
+# Run HMMER on the sequences
+{
+  print "Running HMMer on sequences found by PSI-BLAST...\n" if $VERBOSE;
+  my $hmmer = hmmer(@seqs);                       # CC sub is below
+  $hmmer->write_file("$output.hmm");              # write_file is in the Read.pm called from the HMMER::Profile module
+}
+print ">>70% complete\n";
+
+$dtime = time - $initime;
+print "Time STEP5: $dtime\n";
+
+# Run Jnet for the prediction
+print "Running JNet using the generated inputs from HMM and PSI-BLAST...\n" if $VERBOSE;
+jnet( map { "$output.$_" } qw(hmm jnet pssm) );    # CC sub is below
+
+print "Jpred Finished\n";
+
+$dtime = time - $initime;
+print "Time STEP6: $dtime\n";
+
+# Then do an accuracy prediction
+
+############################################################
+# Functions
+############################################################
+
+=begin :private
+
+=head2 $PSISEQ = dex($PSISEQ)
+
+Returns a PSISEQ object which has any masked residues replaced by their entry from the unfiltered database. Does it in place.
+
+=cut
+
+BEGIN {
+  my $idx = Index->new( type => "Index::FastaCMD" ) or die "Index type cannot be found.";
+
+  sub dex {
+    my ($seq) = @_;
+
+    croak "JPRED: dex: can only take a PSISEQ object as an argument" unless isa $seq, 'PSISEQ';
+
+    # Only bother if we have a sequence which has been masked
+    return unless grep { uc $_ eq 'X' } @{ $seq->align };
+
+    my ( $id, $start, @align ) = ( $seq->id, $seq->start, @{ $seq->align } );
+
+    #$id = "$id"; # Add the EMBOSS USA
+    #$id = "sprot_37:$id"; # Add the EMBOSS USA
+    #$id = "sprot_43:$id"; # Add the EMBOSS USA
+    #      $id = $database->{$db_entry}{emboss} . ":$id";  # commented out to try FastaCMD module
+    my $searchdb = $database->{$db_entry}{unfiltered};
+    $start--;    # We need this to be zero based
+
+    my $f    = $idx->get_sequence( $id, $searchdb ) or croak "JPRED: No such entry for $id in $searchdb\n" and return;    # CC sub is from Index::EMBOSS
+    my @seqs = $f->get_entries;                                                                                           ## Sub is from Sequence::File
+    my $db   = shift @seqs;
+
+    unless ($db) {
+      confess "JPRED: dex: Accession number $id returned no sequences";
+    } elsif (@seqs) {
+      confess "JPRED: dex: Accession number $id returned more than one sequence";
+    }
+
+    my @db_seq = @{ $db->seq };
+
+    # $i is a pointer into the original, ungapped, unmasked sequence. $_ is
+    # for the aligned sequence
+    my $i = 0;
+    for ( 0 .. $#align ) {
+      next if $align[$_] =~ /$GAP/;
+
+      if ( $align[$_] eq 'X' ) {
+        unless ( defined $db_seq[ $i + $start ] ) {
+          croak "JPRED: dex: the database sequence is not as long as the query sequence!";
+        }
+        $align[$_] = $db_seq[ $i + $start ];
+      }
+      $i++;
+    }
+
+    $seq->align( \@align );
+  }
+}
+
+=head2 @PSISEQS_OUT = reduce ($max, @PSISEQS_IN);
+
+Reduces @PSISEQS_IN to at most $max sequences by taking every n sequences in @PSISEQ_IN.
+
+Equivilent to reduce script.
+
+=cut
+
+sub reduce {
+  my ( $max, @seqs ) = @_;
+
+  my $num = int( @seqs / $max );
+
+  my @res = shift @seqs;
+
+  # Don't bother if we have less than the required sequences
+  if ( @seqs < $max ) { return @res, @seqs }
+  if ( $num == 0 )    { return @res, @seqs }
+
+  for ( 0 .. $#seqs ) { push @res, $seqs[$_] if $_ % $num == 0 }
+
+  return @res;
+}
+
+=head2 nonred($cutoff, @PSISEQS);
+
+Removes redundant sequences at $cutoff level of sequence identity.
+
+Equivilent to nonred script.
+
+=cut
+
+sub nonred {
+  my ( $cutoff, @seqs ) = @_;
+
+  # Run pairwise and then OC
+  # Remove similar sequences
+
+  unless ( defined $cutoff ) { croak "JPRED: nonred() not passed a cutoff" }
+  unless (@seqs)             { croak "JPRED: No sequences passed to nonred()" }
+  if     ( @seqs == 1 ) {
+    warn "JPRED: Only one sequence passed to nonred(). Not reducing sequence redundancy\n";
+    return @seqs;
+  }
+
+  my $fasta = FASTA::File->new;
+
+  # Convert the sequences into a FASTA object, which is what
+  # pairwise expects.
+  $fasta->add_entries(
+    map {
+      my $f = FASTA->new( id => $_->id );
+      $f->seq( @{ $_->align } );
+      $f;
+      } @seqs
+  );
+
+  # Run pairwise via wrappers
+  use Pairwise;
+  my $pair = Pairwise->new( path => $pairwise );
+  my $foo = join "\n", $pair->run($fasta) or die $!;
+
+  # Run OC
+  my $ocres = OC->new( path => "$oc sim complete cut $cutoff" );
+  $ocres->read_string( join "", $ocres->run($foo) );
+
+  # Now found those entries that aren't related
+  my @keep;
+  {
+    for ( $ocres->get_groups ) {
+      my ( $group, $score, $size, @labels ) = @{$_};
+
+      # Keep the QUERY from the cluster, otherwise just get one
+      if ( grep { /QUERY/ } @labels ) {
+
+        # Make sure the query stays at the start
+        unshift @keep, "QUERY";
+        next;
+      } else {
+        push @keep, shift @labels;
+      }
+    }
+
+    push @keep, $ocres->get_unclustered;
+  }
+
+  # Return the matching entries.
+  my @return;
+
+  # We use the temporay to mimic the selection of sequences in the nonred
+  # script, which took the sequences in the order they occured in the file.
+  for (@seqs) {
+    my $label = $_->id;
+    if ( grep { $_ =~ /^$label$/ } @keep ) {
+      push @return, $_;
+    }
+  }
+
+  return @return;
+}
+
+=head2 @seqs = del_long_seqs($percentage, @PSISEQS)
+
+Removes those sequences that are more than $percentage longer or shorter than the first 
+sequence in @seqs. @seqs is an array of PSISEQ objects.
+
+Equivilent to trim_seqs script.
+
+=cut
+
+sub del_long_seqs {
+  my ( $factor, @seqs ) = @_;
+
+  # Keep the query sequence
+  my $query = shift @seqs;
+  my @res   = $query;
+
+  # Find the length of the query sequence without any gaps
+  my $length = ( () = ( join '', @{ $query->align } ) =~ /[^$GAP]/g );
+
+  # Calculate the upper and lower allowed bounds
+  my ( $upper, $lower );
+  {
+    my $bounds = ( $length / 100 ) * $factor;
+    ( $upper, $lower ) = ( $length + $bounds, $length - $bounds );
+  }
+
+  # Now try each sequence and see how long they are
+  for (@seqs) {
+    my $l = ( () = ( join '', @{ $_->align } ) =~ /[^$GAP]/g );
+    if ( $l >= $lower && $l <= $upper ) { push @res, $_ }
+  }
+
+  return @res;
+}
+
+=head2 toupper ($PSISEQ)
+
+Converts sequence held in PSISEQ object to uppercase.
+
+=cut
+
+sub toupper {
+  croak "JPRED: toupper: argument not a PSISEQ object" unless isa $_[0], 'PSISEQ';
+  $_[0]->align( [ split //, uc join '', @{ $_[0]->align } ] );
+}
+
+=head2 degap($PSISEQ_QUERY, @PSISEQS)
+
+Removes gaps in the query sequence ($PSISEQ_QUERY) and corresponding positions in @PSISEQS. Change made in place.
+
+Equivilent to fasta2jnet script.
+
+=cut
+
+sub degap {
+  my (@seqs) = @_;
+
+  # Find where the gaps in the query sequence are
+  my @gaps;
+  {
+    my $i = 0;
+    for ( @{ $seqs[0]->align } ) {
+      push @gaps, $i if $_ !~ /$GAP/;
+      $i++;
+    }
+  }
+
+  return unless @gaps;
+
+  # Remove the gaps in all the sequences.
+  # Derefences the array reference and takes a slice inside the method call
+  # arguments, then coerce back to an array ref.
+  for (@seqs) {
+    $_->align( [ @{ $_->align }[@gaps] ] );
+  }
+}
+
+=head2 getfreq($filename, @PSISEQS)
+
+Creates a PSIBLAST like profile and writes it to the $filename.
+
+Equivilant to profile or getfreq (older) script. This doesn't create the same answer as 
+the old jpred, as it got the numbers from PSIBLAST (v2.0.3), whereas this a *similar* output, 
+but it's *not* the same.
+
+=cut
+
+sub getfreq {
+  my ( $fn, @seqs ) = @_;
+
+  croak "JPRED: Passed non PSISEQ object" if grep { !isa( $_, 'PSISEQ' ) } @seqs;
+
+  # Create a PSIBLAST like profile from the alignment
+  # This doesn't greate the same result as old Jpred, I think this is because
+  # differences in the input between old and new
+
+  # For testing
+  #   my $f = FASTA::File->new(read_file => "/homes/jon/jnet/test/1bk4/1bk4.align.fa");
+  #   my @profile = profile(
+  #      map { join "", @{ $_->seq } } $f->get_entries
+  #   );
+
+  my @profile = profile( map { join "", @{ $_->align } } @seqs );
+
+  open my $fh, ">$fn" or die "JPRED: $fn: $!";
+  print $fh join( " ", @{$_} ), "\n" for @profile;
+}
+
+=head2 HMMER::Profile::Jnet = hmmer(@PSISEQS)
+
+Creates a HMMER profile from the aligned sequences in @PSISEQS. Returns a HMMER::Profile::Jnet object.
+
+Equivilent to gethmm script.
+
+=cut
+
+sub hmmer {
+  my (@seqs) = @_;
+
+  # Temp files required
+  my ( $hmmbuild_out, $hmmconvert_out, $tmp_fasta ) = map { File::Temp->new->filename } 1 .. 3;
+
+  # Create the FASTA file
+  psiseq2fasta( $tmp_fasta, @seqs );
+
+  system("$hmmbuild -F --fast --amino --gapmax 1 --wblosum $hmmbuild_out $tmp_fasta");
+  system("$hmmconvert -F -p $hmmbuild_out $hmmconvert_out");
+
+  # Read in the HMMER file
+  my $hmmer = HMMER::Profile->new( read_file => $hmmconvert_out );
+
+  # Convert from HMMER::Profile to HMMER::Profile::Jnet
+  my $hmmer_jnet = HMMER::Profile::Jnet->new;
+  $hmmer_jnet->add_line( @{$_} ) for $hmmer->get_line;
+
+  return $hmmer_jnet;
+}
+
+=head2 jnet($hmmer, $out, $pssm )
+
+Runs Jnet. Pass the paths of the filenames to do the prediction on
+
+=cut
+
+sub jnet {
+  my ( $hmmer, $outfile, $pssm ) = @_;
+  if ($pssm) {
+
+    # run Jnet prediction with all the profile data
+    system("$jnet --concise --hmmer $hmmer --pssm $pssm > $outfile");
+  } else {
+
+    # run Jnet prediction with only HMMer and alignment data
+    system("$jnet --concise --hmmer $hmmer > $outfile");
+  }
+  check( "jnet", $? ) or exit 1;
+}
+
+=head1 psiseq2fasta($path, @PSISEQ)
+
+Writes a FASTA file given an array of PSISEQ objects.
+
+=cut
+
+sub psiseq2fasta {
+  my ( $fn, @seqs ) = @_;
+
+  confess "JPRED: Not passed filename" if isa $fn, 'PSISEQ';
+  @seqs or confess "JPRED: not passed PSISEQs";
+
+  confess "JPRED: Not PSISEQ" if grep { not isa $_, 'PSISEQ' } @seqs;
+
+  # Changed from using FASTA::File object due to seg faulting on some large,
+  # long alignments, presumably due to running out of memory.
+  #   my $fasta = FASTA::File->new;
+  #   $fasta->add_entries(
+  #      map {
+  #         my $f = FASTA->new(id => $_->id);
+  #         $f->seq(@{$_->align});
+  #         $f;
+  #      } @seqs
+  #   );
+  #   $fasta->write_file($fn);
+
+  my $fh;
+  $fn =~ /\.gz$/
+    ? ( open $fh, "| gzip -9 > $fn" or die "JPRED: $!" )
+    : ( open $fh, ">$fn" or die "JPRED: $!" );
+
+  for (@seqs) {
+    print $fh ">", $_->id, "\n";
+    my $seq = join( "", @{ $_->align } );
+    $seq =~ s/(.{72})/$1\n/g;
+    chomp $seq;
+    print $fh $seq . "\n";
+  }
+  close $fh;
+}
+
+=head1 @PSISEQ = fasta2psiseq($path)
+
+Reads in a FASTA file and returns an array of PSISEQ objects.
+
+=cut
+
+sub fasta2psiseq {
+  my ($fn) = @_;
+
+  my $fasta =
+    $fn =~ /\.gz$/
+    ? FASTA::File->new( read_gzip_file => $fn )
+    : FASTA::File->new( read_file      => $fn );
+  $fasta or die "JPRED: $!";
+
+  my @seqs;
+  for ( $fasta->get_entries ) {
+    my $seq = PSISEQ->new;
+    $seq->id( $_->id );
+    $seq->align( [ @{ $_->seq } ] );
+    push @seqs, $seq;
+  }
+
+  return @seqs;
+}
+
+sub fasta2psiseq_lowmem {
+  my ($fn) = @_;
+
+  local $/ = "\n";
+  my $fh;
+  $fn =~ /\.gz$/
+    ? ( open $fh, "gzip -dc $fn|" or die $! )
+    : ( open $fh, $fn or die $! );
+
+  my @seqs;
+
+  my ( $id, $seq );
+  while (<$fh>) {
+    chomp;
+    if (s/^>//) {
+      $seq =~ s/ //g if defined $seq;
+
+      if ( $id and $seq ) {
+        my $psi = PSISEQ->new( id => $id );
+        $psi->align( [ split //, $seq ] );
+        push @seqs, $psi;
+        undef $id;
+        undef $seq;
+      } else {
+        $id = $_;
+      }
+    } else {
+      $seq .= $_;
+    }
+  }
+  if ( $id and $seq ) {
+    my $psi = PSISEQ->new( id => $id );
+    $psi->seq($seq);
+    push @seqs, $psi;
+  }
+
+  return @seqs;
+}
+
+=head1 die_if_no_seqs($size, $message, @seqs)
+
+Exits with error message if @seqs is not at least $size.
+
+=cut
+
+sub die_if_no_seqs {
+  my ( $size, $message, @seqs ) = @_;
+
+  confess "JPRED: Not PSISEQ" if grep { not isa $_, 'PSISEQ' } @seqs;
+
+  chomp $message;
+  die "JPRED: $message\n" unless @seqs > $size;
+}
+
+=head1 extend($FASTA::File, @PSISEQ)
+
+Sometimes PSIBLAST truncates the outputed alignment where it can't matched residues 
+against the query, this function extends the alignment so that all of the query is 
+present in the alignment. The other sequences are extended with gap characters.
+
+=cut
+
+sub extend {
+  my ( $query, @seqs ) = @_;
+
+  croak "JPRED: Not a Sequence::File" if grep { not isa $_, 'Sequence::File' } $query;
+  croak "JPRED: Not PSISEQ"           if grep { not isa $_, 'PSISEQ' } @seqs;
+
+  # Get the query sequence
+  my $q_query = $query->get_entry(0);
+
+  # Get the query sequence from the PSIBLAST alignment
+  my $a_query = shift @seqs;
+
+  # The gap size required to expand the alignment
+  my ( $start_gap_length, $end_gap_length );
+  {
+
+    # Make handling the sequence easier
+    my $q_seq = join "", @{ [ $q_query->seq ] };
+    my $a_seq = join "", @{ $a_query->align };
+
+    $q_seq =~ s/-//g;
+    $a_seq =~ s/-//g;
+
+    ( $q_seq, $a_seq ) = map { uc $_ } $q_seq, $a_seq;
+
+    $start_gap_length = index( $q_seq, $a_seq );
+    croak "JPRED: query sequence from alignment not found in original query sequence" if $start_gap_length == -1;
+
+    $end_gap_length = length($q_seq) - length($a_seq) - $start_gap_length;
+  }
+
+  # Add the gaps to the end of the alignments
+  for (@seqs) {
+    $_->align( [ ($GAP) x $start_gap_length, @{ $_->align }, ($GAP) x $end_gap_length ] );
+  }
+
+  # Put the query sequence back
+  unshift @seqs,
+    PSISEQ->new(
+    id    => $a_query->id,
+    align => [
+      ( $start_gap_length ? @{ $q_query->seq }[ 0 .. ( $start_gap_length - 1 ) ] : () ),
+      @{ $a_query->align },
+      ( $end_gap_length ? @{ $q_query->seq }[ -$end_gap_length .. -1 ] : () ),
+    ]
+    );
+
+  return @seqs;
+}
+
+=head1 $int = fasta_seq_length($path)
+
+Given the path to a FASTA database, find the number of residues/bases in it. Counts whitespace as a residue.
+
+=cut
+
+sub fasta_seq_length {
+  my ($fn) = @_;
+  open my $fh, $fn or croak "Can't open file $fn: $!\n";
+
+  my $length = 0;
+  local $_, $/ = "\n";
+  while (<$fh>) {
+    next if /^>/;
+    chomp;
+    $length += tr///c;
+  }
+
+  return $length;
+}
+
+=head1 log(@messages)
+
+Report messages to STDERR
+
+=cut
+
+sub errlog { print STDERR @_ }
