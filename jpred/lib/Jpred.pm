@@ -98,9 +98,9 @@ our $RESOURCE = "www_service2";                    # Resource for the submission
 # Variables for external programs
 # psiblast
 
-our $BLASTDB = "/home/docker_user/mounted/blastdb";
+our $BLASTDB = "/home/docker_user/data";
 $ENV{BLASTDB} = $BLASTDB;
-$ENV{BLASTMAT} = "$BLASTDB/data";
+$ENV{BLASTMAT} = "$JPREDROOT/bin/data"; 
 #our $SWALL     = "$BLASTDB/uniref90";
 #our $SWALLFILT = "$SWALL.filt";
 #our $PDB       = '/db/blastdb/pdb';
