@@ -21,7 +21,8 @@ our @EXPORT_OK = qw($ff_bignet $analyze $batchman $sov $pairwise $oc $jnet $fast
 
 my $HOME = $ENV{HOME};
 # main production path
-my $BINDIR = '/homes/www-jpred/live4/jpred/bin';
+#my $BINDIR = '/homes/www-jpred/live4/jpred/bin';
+my $BINDIR = '/home/docker_user/jpred/bin';
 # development path
 #my $BINDIR = '/homes/www-jpred/devel/jpred/bin';
 

@@ -35,11 +35,6 @@ BEGIN {
     $JOBDIR 
     $PREFIX 
     $RESOURCE 
-    $BLASTDB 
-    $SWALL 
-    $SWALLFILT 
-    $PDB 
-    $PDB_DAT 
     $JPREDHEAD
     $JPREDHEADTABLE
     $JPREDFOOT 
@@ -83,7 +78,8 @@ our $JPREDEMAIL = 'www-jpred@compbio.dundee.ac.uk';
 our $MAILHOST   = 'smtp.lifesci.dundee.ac.uk';        # CC 19/05/06 - updated to current smtp host from weevil
 
 # Server paths
-our $JPREDROOT = '/homes/www-jpred/live4';
+#our $JPREDROOT = '/homes/www-jpred/live4';
+our $JPREDROOT = '/home/docker_user/jpred';
 #our $JPREDROOT = '/homes/www-jpred/devel';
 
 # Directory for binaries either on the cluster or on the www server
@@ -101,13 +97,14 @@ our $RESOURCE = "www_service2";                    # Resource for the submission
 
 # Variables for external programs
 # psiblast
-$ENV{BLASTMAT} = "$JPREDROOT/data/blast";
-our $BLASTDB = $JPREDROOT . "/databases";
+
+our $BLASTDB = "/home/docker_user/mounted/blastdb";
 $ENV{BLASTDB} = $BLASTDB;
-our $SWALL     = "$BLASTDB/uniref90";
-our $SWALLFILT = "$SWALL.filt";
-our $PDB       = '/db/blastdb/pdb';
-our $PDB_DAT   = '/db/blastdb/DB.dat';
+$ENV{BLASTMAT} = "$BLASTDB/data";
+#our $SWALL     = "$BLASTDB/uniref90";
+#our $SWALLFILT = "$SWALL.filt";
+#our $PDB       = '/db/blastdb/pdb';
+#our $PDB_DAT   = '/db/blastdb/DB.dat';
 
 # ncoils matrix location
 $ENV{COILSDIR} = "$JPREDROOT/data/coils";

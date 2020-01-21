@@ -86,12 +86,12 @@ use warnings;
 use Getopt::Long;
 use Pod::Usage;
 use Carp;
-use UNIVERSAL qw(isa);
+use UNIVERSAL;
 use Data::Dumper;
 use File::Temp;
 
 use FindBin qw($Bin);
-use lib "$Bin/../lib";
+use lib "$Bin/lib";
 #use lib "lib";
 #use lib "/home/asherstnev/Projects/Jpred/jpred/trunk/lib";
 
@@ -118,36 +118,6 @@ our $VERSION   = '4.0.0';
 my $MAX_ALIGN = 1000;      # maximum number of alignment sequences allowed
 my $NR_CUT    = 75;        # cut-off seqeunce ID value for defining non-redundancy
 
-our $BLASTDB = $JPREDROOT . "/databases";
-$ENV{BLASTDB} = $BLASTDB;
-my $myCheckBLASTDB = `echo $BLASTDB`;
-##print "Current BLASTDB env. variable: $myCheckBLASTDB\n";
-print "DB is global.\n";
-#system("cat /homes/www-jpred/databases/checked_hosts.txt");
-if (1) {
-    my $myhost = `hostname | sed 's%\\.% %g' | awk '{print \$1}'`;
-    chomp($myhost);
-    print "Host: $myhost\n";
-    my $mycom = "grep \"$myhost\" /homes/www-jpred/databases/checked_hosts.txt";
-    #print "$mycom\n";
-    my $mytest = qx($mycom);
-    #print "Mytest: $mytest\n";
-    if (length($mytest)>0) {
-	my $localBLASTDB = "/local/gjb_lab/webservices/www-jpred/databases/";
-	$ENV{BLASTDB} = $localBLASTDB;
-	$myCheckBLASTDB = `echo \$BLASTDB`;
-	##print "Changed to local. Current BLASTDB env. variable: $myCheckBLASTDB\n";
-	print "Changed DB to local.\n";
-	#system("ls -ltrh /local/gjb_lab/webservices/www-jpred/databases/* > test.out")
-    } else {
-	#chdir("/local/gjb_lab/webservices/www-jpred/databases/");
-	#my $checkoutput = "/homes/www-jpred/live4/databases/" . $myhost . "_md5sum_test_results.txt";
-	#if (!(-e $checkoutput)) {
-	#    system("md5sum -c /homes/www-jpred/live4/databases/md5sum_check.txt > $checkoutput");
-	#}
-    }
-    #exit;
-} 
 
 # Light object to hold sequence information, light to prevent memory overload
 # for big search results. Even so this is quite memory intensive, I can't see
@@ -193,20 +163,20 @@ if (1) {
 }
 
 # Key to database information and information for accessing them
-my $dbPATH   = '/homes/chris/projects/Jnet/db';
-my $db_entry = "uniref90";
+my $dbPATH   = '/home/docker_user/mounted/blastdb/';
+my $db_entry = "unireffilt";
 my $database = {
 
   ## default database used by Jpred
-  uniref90 => {
+  unireffilt => {
     database   => 'uniref.filt',
-    unfiltered => 'uniref90.fasta',
+    unfiltered => 'uniref.filt',
   },
 
   ## database used during Jnet training
-  training => {
-    database   => 'training/uniref90.filt',
-    unfiltered => 'training/uniref90',
+  kinases => {
+    database   => 'kinases',
+    unfiltered => 'kinases',
   },
 
   ## cluster-specific path for Jpred
@@ -301,10 +271,12 @@ if (1) {
         $psi_run->args . " -z " . fasta_seq_length( $database->{$entry}{database} )    # CC sub is below
       );
     }
-    print "BLAST matrix: $ENV{BLASTMAT}\n" if $DEBUG;
-    print "BLASTDB path: $ENV{BLASTDB}\n"  if $DEBUG;
+    #print "BLAST matrix: $ENV{BLASTMAT}\n" if $DEBUG;
+    #print "BLASTDB path: $ENV{BLASTDB}\n"  if $DEBUG;
+    print "BLAST matrix: $ENV{BLASTMAT}\n";
+    print "BLASTDB path: $ENV{BLASTDB}\n" ;
 
-    print "Running PSI-BLAST on query against \'$database->{$db_entry}{database}\'...\n" if $VERBOSE;
+    print "Running PSI-BLAST on query against \'$database->{$db_entry}{database}\'...\n";
     $psi_run->run or die;                                                              # CC sub is from PSIBLAST::Run
 
     $psi->read_file("$output.blast");                                                  # CC PSIBLAST.pm doesn't have a read_file(), but Read.pm does?
@@ -475,7 +447,7 @@ BEGIN {
   sub dex {
     my ($seq) = @_;
 
-    croak "JPRED: dex: can only take a PSISEQ object as an argument" unless isa $seq, 'PSISEQ';
+    #croak "JPRED: dex: can only take a PSISEQ object as an argument" unless isa $seq, 'PSISEQ';
 
     # Only bother if we have a sequence which has been masked
     return unless grep { uc $_ eq 'X' } @{ $seq->align };
@@ -663,7 +635,7 @@ Converts sequence held in PSISEQ object to uppercase.
 =cut
 
 sub toupper {
-  croak "JPRED: toupper: argument not a PSISEQ object" unless isa $_[0], 'PSISEQ';
+	#croak "JPRED: toupper: argument not a PSISEQ object" unless isa $_[0], 'PSISEQ';
   $_[0]->align( [ split //, uc join '', @{ $_[0]->align } ] );
 }
 
@@ -711,7 +683,7 @@ but it's *not* the same.
 sub getfreq {
   my ( $fn, @seqs ) = @_;
 
-  croak "JPRED: Passed non PSISEQ object" if grep { !isa( $_, 'PSISEQ' ) } @seqs;
+  #  croak "JPRED: Passed non PSISEQ object" if grep { !isa( $_, 'PSISEQ' ) } @seqs;
 
   # Create a PSIBLAST like profile from the alignment
   # This doesn't greate the same result as old Jpred, I think this is because
@@ -788,10 +760,10 @@ Writes a FASTA file given an array of PSISEQ objects.
 sub psiseq2fasta {
   my ( $fn, @seqs ) = @_;
 
-  confess "JPRED: Not passed filename" if isa $fn, 'PSISEQ';
+  #confess "JPRED: Not passed filename" if isa $fn, 'PSISEQ';
   @seqs or confess "JPRED: not passed PSISEQs";
 
-  confess "JPRED: Not PSISEQ" if grep { not isa $_, 'PSISEQ' } @seqs;
+  #confess "JPRED: Not PSISEQ" if grep { not isa $_, 'PSISEQ' } @seqs;
 
   # Changed from using FASTA::File object due to seg faulting on some large,
   # long alignments, presumably due to running out of memory.
@@ -894,7 +866,7 @@ Exits with error message if @seqs is not at least $size.
 sub die_if_no_seqs {
   my ( $size, $message, @seqs ) = @_;
 
-  confess "JPRED: Not PSISEQ" if grep { not isa $_, 'PSISEQ' } @seqs;
+  #  confess "JPRED: Not PSISEQ" if grep { not isa $_, 'PSISEQ' } @seqs;
 
   chomp $message;
   die "JPRED: $message\n" unless @seqs > $size;
@@ -911,8 +883,8 @@ present in the alignment. The other sequences are extended with gap characters.
 sub extend {
   my ( $query, @seqs ) = @_;
 
-  croak "JPRED: Not a Sequence::File" if grep { not isa $_, 'Sequence::File' } $query;
-  croak "JPRED: Not PSISEQ"           if grep { not isa $_, 'PSISEQ' } @seqs;
+  #croak "JPRED: Not a Sequence::File" if grep { not isa $_, 'Sequence::File' } $query;
+  #croak "JPRED: Not PSISEQ"           if grep { not isa $_, 'PSISEQ' } @seqs;
 
   # Get the query sequence
   my $q_query = $query->get_entry(0);

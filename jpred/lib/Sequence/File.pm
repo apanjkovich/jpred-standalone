@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Carp;
 
-use UNIVERSAL qw(isa);
+#use UNIVERSAL qw(isa);
 use base qw(Root Read Write);
 
 =head2 $file->get_entries
@@ -50,7 +50,8 @@ sub add_entries {
   return unless @entries;
 
   for (@entries) {
-    croak "Adding non Sequence object" unless isa $_, "Sequence";
+    #the following check requires UNIVERSAL, I'm commenting it for now... APanjkovich 20200114
+    #croak "Adding non Sequence object" unless isa $_, "Sequence";
     $self->_ids( $_->id );
     push @{ $self->{ __PACKAGE__ . "entries" } }, $_;
   }

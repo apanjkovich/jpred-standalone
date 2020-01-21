@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Carp;
 use IPC::Open3;
-use UNIVERSAL qw(isa);
+#use UNIVERSAL qw(isa);
 use File::Temp;
 use base qw(Root Common);
 
@@ -22,7 +22,7 @@ sub path {
 sub run {
   my ( $self, $fasta ) = @_;
 
-  croak "Non FASTA::File object passed to Pairwise::run" unless isa $fasta, 'FASTA::File';
+  #croak "Non FASTA::File object passed to Pairwise::run" unless isa $fasta, 'FASTA::File';
 
   local ( $/, $? ) = ( undef, 0 );
 

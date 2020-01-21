@@ -65,6 +65,8 @@ sub run {
     #for (keys %ENV) { warn "$_=$ENV{$_}\n" }
     warn "$cmd\n";
   }
+  
+  warn "About to execute: $cmd\n";
 
   system($cmd) == 0 or check( "blastpgp", $? ) and die "blastpgp was naughty";
 
