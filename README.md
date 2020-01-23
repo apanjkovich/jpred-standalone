@@ -5,18 +5,20 @@ docker image for running standalone jpred
 
 ### I. Initialization and testing
 
-1. BUILD the image:
+1. Check Dockerfile variables regarding user and group to match your needs
+
+2. BUILD the image:
 ```
 docker build -t jpredimage2 .
 ```
 
-2. RUN container and mount corresponding volumes:
+3. RUN container and mount corresponding volumes:
 ```
 docker run -d -it -v $(pwd)/data:/home/docker_user/data -v $(pwd)/io:/home/docker_user/io -v $(pwd)/jpred:/home/docker_user/jpred --user docker_user:10000 -e UID=$(id -u) --name  jpredcontainer2  jpredimage2:latest
 
 ```
 
-3. Execute jpred using your running docker container: 
+4. Execute jpred using your running docker container: 
 
 This is an included example for your convenience.
 
