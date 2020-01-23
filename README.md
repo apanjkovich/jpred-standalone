@@ -1,9 +1,9 @@
 # jpred-standalone
 docker image for running standalone jpred
 
-INSTRUCTIONS
+## INSTRUCTIONS
 
-I. Initialization and testing
+### I. Initialization and testing
 
 1. BUILD the image:
 ```
@@ -16,7 +16,10 @@ docker run -d -it -v $(pwd)/data:/home/docker_user/data -v $(pwd)/io:/home/docke
 
 ```
 
-3. EXEC jpred using docker EXEC command: 
+3. Execute jpred using your running docker container: 
+
+This is an included example for your convenience.
+
 ```
 docker exec -it jpredcontainer2 /home/docker_user/jpred/jpred --sequence io/example_protein.fasta --db kinases --output io/testing
 ```
@@ -25,7 +28,7 @@ docker exec -it jpredcontainer2 /home/docker_user/jpred/jpred --sequence io/exam
   -This step can be repeated for processing multiple sequences.
 	
 
-II. Usage
+### II. Usage
 
 1. Prepare your data files
   -Place the provided blast database in the 'data' directory.
