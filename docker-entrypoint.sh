@@ -1,14 +1,17 @@
 #!/bin/bash
 
-# add RCE user group and its GID
-sudo /usr/sbin/groupadd linux-sdusers -g 10000
+# Add user group and its GID inside the container
+# The here is controlling ownership of files produced 
+sudo /usr/sbin/groupadd ${USER_GROUP} -g ${GID}
 
 # Change mounted folder permisions
-sudo chown ${USER}:linux-sdusers $HOME/mounted
-sudo chown ${USER}:linux-sdusers $HOME/jpred
+# By default thos folders inside the docker container
+# belong to root
+sudo chown ${USER}:${GID} ${HOME}/io
+sudo chown ${USER}:${GID} ${HOME}/jpred
 
-# Change UID to real RCE user ID
-sudo usermod -u $UID docker_user
+# Change container UID to match host system user ID
+sudo usermod -u ${UID} ${USER}
 
-# Finally let sudo ask for a passwd
+# Finally let sudo ask for a passwd (if needed)
 #sudo sed 's/^/#/' /etc/sudoers.d/docker_user
