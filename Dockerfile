@@ -1,23 +1,25 @@
-
 # Origin of the image
 FROM ubuntu:18.04
+
+# Declare non privileged user for our container
+ARG USER=docker_user
+
+## Set Container user group for convenience
+ENV USER_GROUP=linux_sduser
+
+## Container Group ID
+ENV GID=10000
+
+## Container User name
+ENV USER=$USER
+
+## Set Container user ID our current user ID
+ENV UID=$UID
 
 # Install packages
 RUN apt-get update && \
  apt-get install -y \
  man tcsh wget vim sudo make gcc hmmer clustalw perl build-essential cpanminus 
-
-# Declare non privileged user for our container
-ARG USER=docker_user
-
-## Set Container user ID our current user ID
-ENV UID=${UID}
-## Set Container user group for convenience
-ENV USER_GROUP=linux_sduser
-## Container Group ID
-ENV GID=10000
-## Container User name
-ENV USER=$USER
 
 # Create group and unpriviledge user and add it to sudoers without password
 RUN groupadd $GID 

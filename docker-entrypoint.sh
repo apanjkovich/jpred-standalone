@@ -7,8 +7,8 @@ sudo /usr/sbin/groupadd ${USER_GROUP} -g ${GID}
 # Change mounted folder permisions
 # By default thos folders inside the docker container
 # belong to root
-sudo chown ${USER}:${GID} ${HOME}/io
-sudo chown ${USER}:${GID} ${HOME}/jpred
+sudo chown ${USER}:${USER_GROUP} ${HOME}/io
+sudo chown ${USER}:${USER_GROUP} ${HOME}/jpred
 
 # Change container UID to match host system user ID
 sudo usermod -u ${UID} ${USER}
