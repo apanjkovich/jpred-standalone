@@ -170,10 +170,10 @@ my $database = {
   ## default database used by Jpred
   unireffilt => {
     database   => 'uniref.filt',
-    unfiltered => 'uniref.filt',
+    unfiltered => 'uniref90.fasta',
   },
 
-  ## database used during Jnet training
+  ## bogus database for quick testing
   kinases => {
     database   => 'kinases',
     unfiltered => 'kinases',
